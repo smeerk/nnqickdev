@@ -1667,7 +1667,7 @@ class QickSoc(Overlay, QickConfig):
             Allow a DDR4 acqusition that exceeds the DDR4 memory capacity. The memory will be used as a circular buffer:
             later transfers will wrap around to the beginning of the memory and overwrite older data.
         """
-        self.ddr4_buf.set_switch(self['readouts'][ch]['avgbuf_fullpath'])
+        # self.ddr4_buf.set_switch(self['readouts'][ch]['avgbuf_fullpath']) # --smeerk
         self.ddr4_buf.arm(nt, force_overwrite)
 
     def arm_mr(self, ch):

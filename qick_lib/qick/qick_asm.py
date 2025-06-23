@@ -143,7 +143,16 @@ class QickConfig():
                 adc = self['rf']['adcs'][adcname]
                 buflen = readout['buf_maxlen']/readout['f_output']
                 if 'tproc_ctrl' in readout:
-                    lines.append("\t%d:\t%s - configured by tProc output %d" % (iReadout, readout['ro_type'], readout['tproc_ctrl']))
+                    lines.append("\t%d:\t%s - configured by tProc output %d" % (iReadout, readout['ro_type'], readout['tproc_ctrl']))                 
+                elif readout['ro_type'] == 'axis_nn_readout_v2': #--smeerk
+                    lines.append("\t%d:\t%s - standard configuration with 128x32x2 FNN" % (iReadout, readout['ro_type']))
+                    lines.append("\t\tfs=%.3f Msps, decimated=%.3f MHz" %(adc['fs'], readout['f_output']))
+                    lines.append("\t\t%s v%s (%s edge counter, %s weights)" % (
+                        readout['avgbuf_type'], readout['avgbuf_version'], {False:"no",True:"has"}[readout['has_edge_counter']], {False:"no",True:"has"}[readout['has_weights']]))
+                    lines.append("\t\tmemory %d accumulated, %d decimated (%.3f us)" % (
+                        readout['avg_maxlen'], readout['buf_maxlen'], buflen))
+                    lines.append("\t\ttriggered by %s %d, pin %d, feedback to tProc input %d" % (
+                        readout['trigger_type'], readout['trigger_port'], readout['trigger_bit'], readout['tproc_ch']))
                 else:
                     lines.append("\t%d:\t%s - configured by PYNQ" % (iReadout, readout['ro_type']))
                 lines.append("\t\tfs=%.3f Msps, decimated=%.3f MHz, %d-bit DDS, range=%.3f MHz" %
@@ -160,6 +169,7 @@ class QickConfig():
                 lines.append("\t\ttriggered by %s %d, pin %d, feedback to tProc input %d" % (
                     readout['trigger_type'], readout['trigger_port'], readout['trigger_bit'], readout['tproc_ch']))
                 lines.append("\t\t" + self._describe_adc(adcname))
+
 
         with suppress(KeyError): # tproc may be an empty dict
             lines.append("\n\t%d digital output pins:" % (len(tproc['output_pins'])))
@@ -184,9 +194,15 @@ class QickConfig():
             buf = self['ddr4_buf']
             bufnames = [ro['avgbuf_fullpath'] for ro in self['readouts']]
             buflist = [bufnames.index(x) for x in buf['readouts']]
-            buflen = buf['maxlen']/self['readouts'][buflist[0]]['f_fabric']
-            lines.append("\n\tDDR4 memory buffer: %d samples (%.3f sec), %d samples/transfer" % (buf['maxlen'], buflen/1e6, buf['burst_len']))
-            lines.append("\t\twired to readouts %s" % (buflist))
+            if len(buflist) != 0: # --smeerk
+                buflen = buf['maxlen']/self['readouts'][buflist[0]]['f_fabric']
+                lines.append("\n\tDDR4 memory buffer: %d samples (%.3f sec), %d samples/transfer" % (buf['maxlen'], buflen/1e6, buf['burst_len']))
+                lines.append("\t\twired to readouts %s" % (buflist))
+            else: # --smeerk
+                adc = self['rf']['adcs'][buf['adc']]
+                buflen = buf['maxlen']/adc['f_fabric']
+                lines.append("\n\tDDR4 memory buffer: %d samples (%.3f sec), %d samples/transfer" % (buf['maxlen'], buflen/1e6, buf['burst_len']))
+                lines.append("\t\twired to adc %s" % (buf['adc']) + self._describe_adc(buf['adc']))
             #lines.append("\t\twired to readouts %s, triggered by %s %d, pin %d" % (
             #    buflist, buf['trigger_type'], buf['trigger_port'], buf['trigger_bit']))
 

@@ -30,7 +30,7 @@ def _trace_trigger(soc, start_block):
         trigger_port, trigger_type = soc._get_block(block).port2ch(port)
     return trigger_type, trigger_port, trigger_bit
 
-RO_TYPES = ["axis_readout_v2", "axis_readout_v3", "axis_pfb_readout_v2", "axis_pfb_readout_v3", "axis_pfb_readout_v4", "axis_dyn_readout_v1"]
+RO_TYPES = ["axis_readout_v2", "axis_readout_v3", "axis_pfb_readout_v2", "axis_pfb_readout_v3", "axis_pfb_readout_v4", "axis_dyn_readout_v1", "axis_nn_readout_v2"]
 BUF_TYPES = ['axis_avg_buffer', 'axis_weighted_buffer']
 
 class AbsReadout(QickIP):
@@ -483,6 +483,53 @@ class AxisDynReadoutV1(AbsDynReadout):
 
     IP_TYPE = "axis_dyn_readout_v1:0.0"
 
+class AxisNNReadout(QickIP, DummyIP):
+    """this block is not controlled by the tProc, but it is a readout block.
+    This isn't a PYNQ driver, since the block has no registers for PYNQ control.
+    We still need this class to represent the block and its connectivity.
+    """
+    # Downsampling ratio (RFDC samples per decimated readout sample)
+    DOWNSAMPLING = 1
+    # Number of bits in the phase register
+    B_PHASE = None
+    # bindto = ['user.org:user:axis_nn_readout_v2:5.0']
+    IP_TYPE = "axis_nn_readout_v2:5.0"
+
+    def __init__(self, fullpath):
+        # make a fake ip_dict that contains the info needed by QickIP
+        desc = {
+                "type": self.IP_TYPE,
+                "fullpath": fullpath
+                }
+        super().__init__(desc)
+
+    def configure(self, rf):
+        self.rf = rf
+        # Sampling frequency.
+        self.cfg['adc'] = self.adc
+        if self.B_PHASE is not None: self.cfg['b_phase'] = self.B_PHASE
+        adccfg = self.rf['adcs'][self['adc']]
+        for p in ['fs', 'fs_mult', 'fs_div', 'decimation', 'f_fabric']:
+            self.cfg[p] = adccfg[p]
+        self.cfg['f_output'] = self['fs']/(self['decimation']*self.DOWNSAMPLING)
+
+    def configure_connections(self, soc):
+        super().configure_connections(soc)
+
+        self.soc = soc
+
+        # what RFDC port drives this readout?
+        block, port, _ = soc.metadata.trace_back(self['fullpath'], 's_axis', ["usp_rf_data_converter"])
+        # port names are of the form 'm02_axis' where the block number is always even
+        self.adc = port[1:3]
+
+        def update():
+            """
+            Update register values
+            """
+            pass
+
+
 class AxisAvgBuffer(SocIP):
     """
     AxisAvgBuffer class
@@ -599,6 +646,9 @@ class AxisAvgBuffer(SocIP):
             self.readout.configure_connections(soc)
         elif blocktype == "axis_dyn_readout_v1":
             self.readout = AxisDynReadoutV1(block)
+            self.readout.configure_connections(soc)
+        elif blocktype == "axis_nn_readout_v2": # --smeerk
+            self.readout = AxisNNReadout(block)
             self.readout.configure_connections(soc)
         else:
             self.readout = soc._get_block(block)
@@ -1206,7 +1256,8 @@ class AxisBufferDdrV1(SocIP):
         # jump through the smartconnect
         ((block,port),) = soc.metadata.trace_bus(block, 'M00_AXI')
         self.ddr4_mem = soc._get_block(block)
-        self.ddr4_array = self.ddr4_mem.mmio.array.view('uint32')
+        # self.ddr4_array = self.ddr4_mem.mmio.array.view('uint32') # since we have raw data now we get one sample each instead of two (I and Q for each sample) --smeerk
+        self.ddr4_array = self.ddr4_mem.mmio.array.view('uint16')
         self.cfg['maxlen'] = self.ddr4_array.shape[0]
 
         # Typical: buffer_ddr -> clock_converter -> dwidth_converter -> switch (optional) -> broadcaster
@@ -1214,7 +1265,7 @@ class AxisBufferDdrV1(SocIP):
         ((block,port),) = soc.metadata.trace_bus(self['fullpath'], self.STREAM_IN_PORT)
 
         # backtrace until we get to a switch or readout
-        block, port, blocktype = soc.metadata.trace_back(self['fullpath'], self.STREAM_IN_PORT, RO_TYPES+["axis_switch"])
+        block, port, blocktype = soc.metadata.trace_back(self['fullpath'], self.STREAM_IN_PORT, RO_TYPES+["axis_switch"]+["usp_rf_data_converter"])
 
         # get the DDR switch
         if blocktype == "axis_switch":
@@ -1237,6 +1288,9 @@ class AxisBufferDdrV1(SocIP):
 
                 self.buf2switch[block] = iIn
                 self.cfg['readouts'].append(block)
+        elif blocktype == "usp_rf_data_converter": # --smeerk
+            self.cfg['adc'] = port[1:3]
+            self.buf2switch[block] = 0
         else:
             # no switch, just wired to a single readout
             # trace forward to find the avg_buf driven by this readout
@@ -1293,7 +1347,8 @@ class AxisBufferDdrV1(SocIP):
         # therefore we pad out the requested address block, copy the data, and trim
         # this way, no special care needs to be taken with the returned array
         buf_copy = self.ddr4_array[start - (start%2):end + (end%2)].copy()
-        return buf_copy[start%2:length + start%2].view(dtype=np.int16).reshape((-1,2))
+        # return buf_copy[start%2:length + start%2].view(dtype=np.int16).reshape((-1,2)) # no need to reshape if raw data
+        return buf_copy[start%2:length + start%2].view(dtype=np.int16)
 
     def arm(self, nt, force_overwrite=False):
         if nt > self['maxlen']//self['burst_len'] and not force_overwrite:
