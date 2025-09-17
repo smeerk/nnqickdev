@@ -492,6 +492,7 @@ class AxisNNReadout(QickIP, DummyIP):
     DOWNSAMPLING = 1
     # Number of bits in the phase register
     B_PHASE = None
+    B_DDS = 32
     # bindto = ['user.org:user:axis_nn_readout_v2:5.0']
     IP_TYPE = "axis_nn_readout_v2:5.0"
 
@@ -511,7 +512,13 @@ class AxisNNReadout(QickIP, DummyIP):
         adccfg = self.rf['adcs'][self['adc']]
         for p in ['fs', 'fs_mult', 'fs_div', 'decimation', 'f_fabric']:
             self.cfg[p] = adccfg[p]
+        self.cfg['f_dds'] = self['fs']/self['decimation']
+        self.cfg['fdds_div'] = self['fs_div']*self['decimation']
         self.cfg['f_output'] = self['fs']/(self['decimation']*self.DOWNSAMPLING)
+
+        self.cfg['b_dds'] = self.B_DDS
+        self.cfg['iq_offset'] = self.IQ_OFFSET
+        self.cfg['has_outsel'] = False  # this readout does not support output selection
 
     def configure_connections(self, soc):
         super().configure_connections(soc)
@@ -1347,7 +1354,7 @@ class AxisBufferDdrV1(SocIP):
         # therefore we pad out the requested address block, copy the data, and trim
         # this way, no special care needs to be taken with the returned array
         buf_copy = self.ddr4_array[start - (start%2):end + (end%2)].copy()
-        # return buf_copy[start%2:length + start%2].view(dtype=np.int16).reshape((-1,2)) # no need to reshape if raw data
+        # return buf_copy[start%2:length + start%2].view(dtype=np.int16).reshape((-1,2)) # no need to reshape if raw data --smeerk
         return buf_copy[start%2:length + start%2].view(dtype=np.int16)
 
     def arm(self, nt, force_overwrite=False):

@@ -1214,7 +1214,8 @@ class AbsQickProgram(ABC):
                     pfbs[pfbname].append(ro_regs)
                 else:
                     # if this is a standard readout, save the settings and write them to the readout
-                    soc.configure_readout(ch, cfg['ro_config'])
+                    if rocfg['ro_type'] != 'axis_nn_readout_v2':
+                        soc.configure_readout(ch, cfg['ro_config']) #-smeerk
         # write the mux settings
         for pfbpath, pfb_regs in pfbs.items():
             sels = [x.get('sel') for x in pfb_regs]
